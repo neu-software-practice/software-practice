@@ -8,7 +8,7 @@ ENV_FILE ?= .env
 
 .PHONY: help init env require-env check-env config doctor env-print up down restart \
 	logs ps health verify-env medagent-smoke verify-e2e deploy migrate backend-test frontend-test \
-	submodule-status clean
+	submodule-update-latest submodule-status clean
 
 help: ## 查看命令列表，按新手部署顺序阅读
 	@awk 'BEGIN {FS = ":.*##"; printf "\nNEUHIS 一键部署命令:\n  make <target>\n\n"} /^[a-zA-Z0-9_-]+:.*##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -18,6 +18,33 @@ init: ## 1. 初始化/更新 backend、frontend、backend/medAgent 子模块
 	git -C $(BACKEND_DIR) config url.https://github.com/.insteadOf git@github.com:
 	git -C $(BACKEND_DIR) submodule update --init --recursive
 	git -C $(FRONTEND_DIR) submodule update --init --recursive
+
+submodule-update-latest: ## 将 backend、frontend 更新到各自当前分支的远端最新提交
+	@set -euo pipefail; \
+	for module in $(BACKEND_DIR) $(FRONTEND_DIR); do \
+		if [ ! -d "$$module/.git" ] && [ ! -f "$$module/.git" ]; then \
+			git submodule update --init "$$module"; \
+		fi; \
+		branch=$$(git -C "$$module" symbolic-ref --quiet --short HEAD || true); \
+		if [ -z "$$branch" ]; then \
+			echo "ERROR: $$module is detached; checkout a branch before running this target."; \
+			exit 1; \
+		fi; \
+		if [ -n "$$(git -C "$$module" status --porcelain)" ]; then \
+			echo "ERROR: $$module has local changes; commit or stash them before updating."; \
+			exit 1; \
+		fi; \
+		remote=$$(git -C "$$module" config "branch.$$branch.remote" || echo origin); \
+		merge_ref=$$(git -C "$$module" config "branch.$$branch.merge" || echo "refs/heads/$$branch"); \
+		remote_branch="$${merge_ref#refs/heads/}"; \
+		echo "Updating $$module: $$branch <- $$remote/$$remote_branch"; \
+		git -C "$$module" fetch "$$remote" "$$remote_branch"; \
+		git -C "$$module" merge --ff-only FETCH_HEAD; \
+	done
+	git -C $(BACKEND_DIR) config url.https://github.com/.insteadOf git@github.com:
+	git -C $(BACKEND_DIR) submodule update --init --recursive
+	git -C $(FRONTEND_DIR) submodule update --init --recursive
+	git submodule status --recursive
 
 env: ## 2. 从 .env.example 创建 .env；已存在则不覆盖
 	@if [ -f $(ENV_FILE) ]; then \
