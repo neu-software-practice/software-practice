@@ -1,0 +1,8 @@
+[submodule "frontend"]
+	path = frontend
+	url = https://github.com/neu-software-practice/neuhis-agent-front.git
+	branch = main
+[submodule "backend"]
+	path = backend
+	url = https://github.com/neu-software-practice/software-practice-backend.git
+	branch = dev
