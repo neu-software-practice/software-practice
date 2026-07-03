@@ -1,227 +1,282 @@
 # NEUHIS 前后端整合仓库
 
-本仓库是 NEUHIS Agent 项目的整合、部署和交付入口。它不直接承载前端或后端业务源码的日常开发，而是通过 Git submodule 固定前后端项目版本，并在仓库根目录提供统一的环境变量入口、Makefile 命令入口和 Docker Compose 部署方案。
+本仓库是 NEUHIS Agent 的统一部署入口。业务源码仍在子模块中维护：
 
-## 仓库使命
+- `backend/`: 后端服务，容器内监听 `:8080`
+- `frontend/`: 患者端/管理端前端，构建后由 Nginx 在容器内监听 `:80`
+- `backend/medAgent/`: AI 诊疗引擎，容器内监听 `:8080`
+- `mysql`: MySQL 8.4，容器内监听 `:3306`
 
-NEUHIS Agent 由多个独立项目组成：患者端/管理端前端、业务后端、MySQL 数据库和 medAgent AI 诊疗引擎。单独维护这些项目时，开发和部署人员需要分别理解多个仓库的启动方式、环境变量和服务依赖。本仓库的目标是把这些分散入口收敛为一个可复制、可验证、可交付的父仓库。
+根目录只负责四件事：`.env.example`、`Makefile`、`compose.yaml`、Docker/Nginx 部署配置。真实密钥只写入本地 `.env`，不要提交。
 
-本仓库负责：
+## 1. 准备工具
 
-- 以子模块方式引入前端和后端，保持业务源码边界清晰。
-- 提供根目录 `.env.example`，作为整套系统的环境变量部署入口。
-- 提供根目录 `Makefile`，作为初始化、部署、日志、健康检查和测试的统一命令入口。
-- 提供根目录 `compose.yaml`，一键编排前端静态站点、后端服务、MySQL 和 medAgent。
-- 为人类维护者和 AI coding agent 提供同一份仓库级说明文档。
-
-本仓库不负责：
-
-- 在父仓库中直接修改前端或后端业务逻辑。
-- 替代前端、后端各自仓库内的 README、测试策略和开发规范。
-- 管理生产密钥。真实密钥只应写入本地或部署环境的 `.env`，不要提交。
-
-## 项目组成
-
-```text
-software-practice/
-├── backend/                  # 后端子模块：software-practice-backend，dev 分支
-│   └── medAgent/             # 后端内部子模块：AI 诊疗引擎
-├── frontend/                 # 前端子模块：neuhis-agent-front，main 分支
-├── docker/
-│   ├── frontend.Dockerfile   # 前端静态资源构建和 Nginx 镜像
-│   └── nginx/default.conf    # 前端路由回退和 /api 反向代理
-├── compose.yaml              # 整套系统 Docker Compose 编排
-├── Makefile                  # 统一操作入口
-├── .env.example              # 部署环境变量模板
-├── README.md                 # 当前文档
-├── CLAUDE.md -> README.md    # Claude 读取入口
-└── AGENTS.md -> README.md    # Codex/agent 读取入口
-```
-
-子模块来源：
-
-- `backend`: `https://github.com/neu-software-practice/software-practice-backend.git`，跟踪 `dev` 分支。
-- `frontend`: `https://github.com/neu-software-practice/neuhis-agent-front.git`，跟踪 `main` 分支。
-- `backend/medAgent`: 由后端仓库自身的 `.gitmodules` 管理。
-
-## 运行架构
-
-默认部署拓扑如下：
-
-```text
-Browser
-  |
-  | http://localhost:${FRONTEND_PORT}
-  v
-frontend container (Nginx + Vite static files)
-  |
-  | /api/*
-  v
-backend container (Gin REST/SSE API)
-  |                     |
-  | DATABASE_DSN        | MEDAGENT_BASE_URL
-  v                     v
-mysql container      medagent container
-```
-
-前端构建时默认使用真实后端模式：
-
-- `VITE_API_MODE=http`
-- `VITE_API_BASE_URL=/api`
-
-Nginx 负责把浏览器访问的 `/api/` 反向代理到后端容器的 `http://backend:8080/api/`。后端启动时会自动执行 `backend/db/migrations` 下的数据库迁移。
-
-## 快速开始
-
-前置条件：
+本机需要安装：
 
 - Git
 - Docker 和 Docker Compose
 - Make
-- 可访问 GitHub 和容器镜像仓库
+- 能访问 GitHub 和容器镜像仓库
 
-克隆并初始化：
+检查 Docker Compose：
 
 ```bash
-git clone https://github.com/neu-software-practice/software-practice.git
-cd software-practice
+docker compose version
+```
+
+预期结果：输出 Docker Compose 版本号。
+
+## 2. 初始化仓库
+
+```bash
 make init
+```
+
+预期结果：
+
+- `backend/` 和 `frontend/` 子模块被拉取。
+- `backend/medAgent/` 递归初始化完成。
+- 如果 medAgent 子模块声明了 SSH 地址，Makefile 会把 `git@github.com:` 本地替换为 `https://github.com/`，便于无 SSH key 的环境拉取。
+
+查看子模块状态：
+
+```bash
+make submodule-status
+```
+
+预期结果：能看到 `backend`、`frontend`、`backend/medAgent` 的提交指针。
+
+## 3. 创建并填写 `.env`
+
+```bash
 make env
 ```
 
-编辑 `.env`，至少替换以下值：
+预期结果：
+
+- 如果 `.env` 不存在，会从 `.env.example` 复制一份。
+- 如果 `.env` 已存在，不会覆盖本地配置。
+
+打开 `.env`，至少修改这三项：
 
 ```env
-JWT_SECRET=change-to-a-random-string-at-least-32-bytes
-ADMIN_JWT_SECRET=change-to-another-random-string-at-least-32-bytes
-MEDAGENT_API_KEY=sk-your-real-provider-key
+JWT_SECRET=local-jwt-secret-at-least-32-bytes
+ADMIN_JWT_SECRET=local-admin-secret-at-least-32-bytes
+MEDAGENT_API_KEY=sk-local-test-key
 ```
 
-启动整套系统：
+说明：
+
+- `JWT_SECRET` 和 `ADMIN_JWT_SECRET` 必须不少于 32 字节，且不能继续使用占位值。
+- `MEDAGENT_API_KEY` 不能是 `sk-replace-me`。端到端配置验证不调用真实 LLM，测试启动时可以先填一个非空测试值；真实问诊必须换成真实 provider key。
+
+## 4. 部署前体检
+
+```bash
+make doctor
+```
+
+预期结果：
+
+```text
+OK: required secrets in .env are set.
+OK: Docker Compose config can be rendered from .env.
+Next: make up, or run the full check with make verify-e2e.
+```
+
+如果失败：
+
+- 提示 `Missing .env`：先执行 `make env`。
+- 提示 `JWT_SECRET`、`ADMIN_JWT_SECRET`、`MEDAGENT_API_KEY`：编辑 `.env`，替换占位值。
+- Compose 展开失败：执行 `make config` 查看具体 YAML 错误。
+
+查看 `.env` 展开后的完整 Compose 配置：
+
+```bash
+make config
+```
+
+预期结果：输出最终 Compose YAML，其中能看到端口映射、backend 环境变量、mysql 环境变量、medagent 环境变量和 frontend build args。
+
+## 5. 一键端到端验证
+
+推荐直接运行：
+
+```bash
+make verify-e2e
+```
+
+它会依次执行：
+
+1. `make doctor`
+2. `make up`
+3. `make ps`
+4. `make health`
+5. `make verify-env`
+
+预期结果：
+
+- 所有镜像构建成功。
+- `docker compose ps` 中 `frontend`、`backend`、`mysql`、`medagent` 都处于运行状态。
+- 后端健康检查返回 `{"status":"ok"}`。
+- 前端首页可以通过宿主机端口访问。
+- `make verify-env` 每一项都输出 `OK:`。
+
+部署主入口也是同一套验证：
 
 ```bash
 make deploy
 ```
 
-默认访问地址：
+## 6. 默认访问地址
+
+```bash
+make env-print
+```
+
+默认输出应对应：
 
 - 前端：`http://localhost:5173`
 - 后端健康检查：`http://localhost:8080/api/health`
-- medAgent：`http://localhost:8083`
 - MySQL：`localhost:3306`
+- medAgent：`http://localhost:8083`
 
-## 环境变量入口
+容器内部固定地址：
 
-根目录 `.env.example` 是整合部署的唯一模板。运行 `make env` 会在 `.env` 不存在时复制该模板；如果 `.env` 已存在，不会覆盖。
+- frontend Nginx：`:80`
+- backend API：`backend:8080`
+- MySQL：`mysql:3306`
+- medAgent：`medagent:8080`
 
-关键变量：
+注意：容器之间不要使用 `localhost` 互相访问。`localhost` 在容器内只代表容器自己。
 
-| 变量 | 说明 |
-| --- | --- |
-| `FRONTEND_PORT` | 前端 Nginx 暴露到宿主机的端口，默认 `5173` |
-| `BACKEND_PORT` | 后端 API 暴露到宿主机的端口，默认 `8080` |
-| `MYSQL_PORT` | MySQL 暴露到宿主机的端口，默认 `3306` |
-| `MEDAGENT_PORT` | medAgent 暴露到宿主机的端口，默认 `8083` |
-| `JWT_SECRET` | 患者端 JWT 密钥，必须至少 32 字节 |
-| `ADMIN_JWT_SECRET` | 管理端 JWT 密钥，必须至少 32 字节 |
-| `MEDAGENT_API_KEY` | DeepSeek、Qwen 或 OpenAI 兼容服务的 API Key |
-| `MEDAGENT_PROVIDER` | medAgent Provider，默认 `deepseek` |
-| `MEDAGENT_MODEL` | medAgent 模型名，默认 `deepseek-chat` |
-| `VITE_API_MODE` | 前端 API 模式，整合部署默认 `http` |
-| `VITE_API_BASE_URL` | 前端 API 基础路径，整合部署默认 `/api` |
+## 7. `.env` 如何传到容器
 
-`make check-env` 会阻止使用默认占位密钥部署。`.env` 已被 `.gitignore` 忽略，不应提交。
+| `.env` 变量 | 进入位置 | 验证方式 | 说明 |
+| --- | --- | --- | --- |
+| `FRONTEND_PORT` | Compose 端口映射 | `make health` / `make env-print` | 宿主机访问前端的端口，容器内仍是 `80` |
+| `BACKEND_PORT` | Compose 端口映射 | `make health` / `make env-print` | 宿主机访问后端的端口，容器内仍是 `8080` |
+| `MYSQL_PORT` | Compose 端口映射 | `make env-print` | 宿主机访问 MySQL 的端口，容器内仍是 `3306` |
+| `MEDAGENT_PORT` | Compose 端口映射 | `make env-print` | 宿主机访问 medAgent 的端口，容器内仍是 `8080` |
+| `COMPOSE_PROJECT_NAME` | Compose 项目名 | `make config` | 影响容器、网络、volume 名称前缀 |
+| `GOPROXY` | backend build arg、medagent env | `make config` / `make verify-env` | Go 依赖下载代理 |
+| `SERVER_ADDR` | backend env | `make verify-env` | 后端容器内监听地址，默认 `:8080` |
+| `SERVER_MODE` | backend env | `make verify-env` | 后端运行模式 |
+| `JWT_SECRET` | backend env | `make verify-env` | 患者端 JWT 密钥 |
+| `ADMIN_JWT_SECRET` | backend env | `make verify-env` | 管理端 JWT 密钥 |
+| `CORS_ALLOWED_ORIGINS` | backend env | `make verify-env` | 允许跨域来源 |
+| `LOG_LEVEL` | backend env | `make verify-env` | 后端日志级别 |
+| `RATE_LIMIT_RPS` | backend env | `make verify-env` | 限流每秒请求数 |
+| `RATE_LIMIT_BURST` | backend env | `make verify-env` | 限流突发容量 |
+| `MYSQL_ROOT_PASSWORD` | mysql env、backend `DATABASE_DSN` | `make verify-env` | 改动后如果旧 volume 已存在，需 `make clean` |
+| `MYSQL_DATABASE` | mysql env、backend `DATABASE_DSN` | `make verify-env` | backend 连接的数据库名 |
+| `MEDAGENT_MODE` | backend env | `make verify-env` | 后端调用 medAgent 的模式 |
+| `MEDAGENT_BASE_URL` | backend env | `make verify-env` | 集成部署默认 `http://medagent:8080` |
+| `MEDAGENT_API_KEY` | backend env、medagent provider key env | `make verify-env` | 同步为 `DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`、`OPENAI_API_KEY` |
+| `MEDAGENT_PROVIDER` | backend env、medagent env/command | `make verify-env` | `deepseek`、`qwen` 或 `openai` |
+| `MEDAGENT_MODEL` | backend env、medagent env/command | `make verify-env` | 当前模型名 |
+| `VITE_API_MODE` | frontend build arg | `make config` / `make verify-env` | 前端构建期变量，改动后必须重建 |
+| `VITE_API_BASE_URL` | frontend build arg | `make config` / `make verify-env` | 默认 `/api`，由 Nginx 代理到 backend |
+| `VITE_MOCK_DELAY_MS` | frontend build arg | `make config` / `make verify-env` | Mock 延迟 |
+| `VITE_TIMELINE_POLL_INTERVAL_MS` | frontend build arg | `make config` / `make verify-env` | 时间线轮询间隔 |
+| `VITE_CREATE_VISIT_TIMEOUT_MS` | frontend build arg | `make config` / `make verify-env` | 创建问诊超时时间 |
 
-## Makefile 使用方式
+backend 容器内的 `DATABASE_DSN` 不再要求用户在父仓库 `.env` 中手写。Compose 会根据 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_DATABASE` 生成 `root:<password>@tcp(mysql:3306)/<database>?charset=utf8mb4&parseTime=True&loc=Local`，`make verify-env` 会进入 backend 容器检查最终值。
 
-常用命令：
+重要：`VITE_*` 是前端构建期变量，不会保留在最终 Nginx 运行容器的环境变量里。因此 `make verify-env` 通过 Compose build args 验证它们。
 
-```bash
-make help              # 查看全部命令
-make init              # 初始化/更新 backend、frontend 和 backend/medAgent 子模块
-make env               # 从 .env.example 创建 .env，已存在则不覆盖
-make check-env         # 检查关键密钥是否仍为占位值
-make deploy            # 初始化、校验、构建、启动并执行健康检查
-make up                # 构建并启动所有服务
-make health            # 检查前端首页和后端 /api/health
-make logs              # 跟随查看所有服务日志
-make ps                # 查看 Compose 服务状态
-make restart           # 重启整套服务
-make down              # 停止服务，保留 volume
-make clean             # 停止服务并删除 volume
-make migrate           # 启动 MySQL、medAgent、后端；后端启动时自动迁移
-make submodule-status  # 查看递归子模块状态
-make backend-test      # 进入 backend 执行 go test ./...
-make frontend-test     # 进入 frontend 安装依赖并执行 pnpm test
-```
+## 8. 手动检查命令
 
-部署主路径推荐使用：
-
-```bash
-make init
-make env
-# 编辑 .env
-make deploy
-```
-
-## 子模块维护
-
-查看当前锁定版本：
-
-```bash
-git submodule status --recursive
-```
-
-更新子模块到父仓库记录的版本：
-
-```bash
-make init
-```
-
-如果需要推进某个子模块版本，应在对应子模块中切到目标提交或分支并验证，再回到父仓库提交子模块指针变更。例如：
-
-```bash
-cd backend
-git fetch origin dev
-git checkout dev
-git pull --ff-only
-cd ..
-git status
-```
-
-后端内部的 `medAgent` 使用 SSH URL 声明。`make init` 会在后端子模块本地设置 `git@github.com:` 到 `https://github.com/` 的替换，便于无 SSH key 的部署环境递归初始化。
-
-## 部署验证
-
-部署后执行：
+检查容器状态：
 
 ```bash
 make ps
+```
+
+预期结果：四个服务都在运行。
+
+检查后端和前端：
+
+```bash
 make health
 ```
 
-也可以直接检查：
+预期结果：
+
+```text
+OK: backend http://localhost:8080/api/health returned {"status":"ok"}
+OK: frontend http://localhost:5173/ returned HTML.
+```
+
+逐项检查容器内变量：
 
 ```bash
-curl http://localhost:8080/api/health
-curl http://localhost:5173/
+make verify-env
 ```
 
-后端健康检查应返回：
+预期结果示例：
 
-```json
-{"status":"ok"}
+```text
+OK: backend SERVER_ADDR=:8080
+OK: backend DATABASE_DSN=root:<password>@tcp(mysql:3306)/neuhis?charset=utf8mb4&parseTime=True&loc=Local
+OK: mysql MYSQL_DATABASE=neuhis
+OK: medagent MEDAGENT_PROVIDER=deepseek
+OK: compose config FRONTEND_PORT
+OK: compose build arg VITE_API_BASE_URL=/api
+OK: all runtime env vars and frontend build args match .env.
 ```
 
-## 常见问题
+密钥类变量会被脱敏显示为 `<set:N chars>`。
 
-### `make check-env` 提示需要更新密钥
+查看日志：
 
-这是预期保护。编辑 `.env`，替换 `JWT_SECRET`、`ADMIN_JWT_SECRET` 和 `MEDAGENT_API_KEY` 后重试。
+```bash
+make logs
+```
+
+停止服务但保留数据库：
+
+```bash
+make down
+```
+
+停止服务并删除 MySQL volume：
+
+```bash
+make clean
+```
+
+## 9. 修改 `.env` 后如何生效
+
+| 修改内容 | 推荐命令 | 原因 |
+| --- | --- | --- |
+| `FRONTEND_PORT`、`BACKEND_PORT`、`MYSQL_PORT`、`MEDAGENT_PORT` | `make restart` | 端口映射由 Compose 重建容器生效 |
+| backend 运行变量，如 `SERVER_MODE`、`CORS_ALLOWED_ORIGINS`、`LOG_LEVEL` | `make restart` | 运行时环境变量需要重建容器 |
+| `MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE` | `make clean && make deploy` | MySQL 初始化值写入 volume，旧 volume 不会自动改密码/库名 |
+| `MEDAGENT_PROVIDER`、`MEDAGENT_MODEL`、`MEDAGENT_API_KEY` | `make restart` | medAgent 和 backend 都要拿到新环境变量 |
+| 任意 `VITE_*` | `make up` 或 `make deploy` | 前端构建期变量必须重新 build |
+
+## 10. 常见断点
+
+### `make doctor` 提示密钥错误
+
+编辑 `.env`，替换：
+
+```env
+JWT_SECRET=local-jwt-secret-at-least-32-bytes
+ADMIN_JWT_SECRET=local-admin-secret-at-least-32-bytes
+MEDAGENT_API_KEY=sk-local-test-key
+```
+
+再运行：
+
+```bash
+make doctor
+```
 
 ### 端口已被占用
 
-修改 `.env` 中的端口变量，例如：
+修改 `.env`：
 
 ```env
 FRONTEND_PORT=15173
@@ -230,19 +285,94 @@ MYSQL_PORT=13306
 MEDAGENT_PORT=18083
 ```
 
-然后重新执行：
+然后：
 
 ```bash
+make restart
+make health
+```
+
+### MySQL 密码或库名改了但后端连不上
+
+MySQL 官方镜像只在首次创建 volume 时初始化密码和库名。修改 `MYSQL_ROOT_PASSWORD` 或 `MYSQL_DATABASE` 后，如果旧 volume 还在，需要：
+
+```bash
+make clean
 make deploy
 ```
 
-### 前端 Docker 构建没有执行 `pnpm build`
+### 前端还是旧 API 地址或旧超时时间
 
-当前部署镜像使用 `pnpm exec vite build` 生成静态资源。前端子模块当前存在 TypeScript 严格构建错误，直接执行 `pnpm build` 会被 `tsc -b` 阻断；整合部署不在父仓库中修改前端业务源码，因此镜像构建只执行 Vite 产物构建。前端类型问题应在 `frontend` 子模块中单独修复。
+`VITE_*` 是构建期变量。修改后必须重新构建：
 
-### 后端测试遇到 testcontainers 或 Ryuk 问题
+```bash
+make up
+make verify-env
+```
 
-父仓库的 `make backend-test` 运行 `go test ./...`。如果执行覆盖率或集成测试时遇到 Ryuk 连接问题，可在后端仓库内按其测试约定使用：
+### medAgent 启动失败
+
+检查 provider 和 key：
+
+```bash
+make logs
+make verify-env
+```
+
+`MEDAGENT_PROVIDER=deepseek` 时 medAgent 需要 `DEEPSEEK_API_KEY`。Compose 会把 `MEDAGENT_API_KEY` 同步到 `DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`、`OPENAI_API_KEY`，所以通常只需要检查 `.env` 中的 `MEDAGENT_API_KEY` 是否非空。
+
+### CORS 报错
+
+默认本地整合部署：
+
+```env
+CORS_ALLOWED_ORIGINS=http://localhost:5173
+```
+
+如果改了 `FRONTEND_PORT`，同时改 CORS：
+
+```env
+FRONTEND_PORT=15173
+CORS_ALLOWED_ORIGINS=http://localhost:15173
+```
+
+然后：
+
+```bash
+make restart
+```
+
+## 11. 子模块维护
+
+更新到父仓库记录的版本：
+
+```bash
+make init
+```
+
+查看当前锁定版本：
+
+```bash
+make submodule-status
+```
+
+如果需要推进某个子模块版本，应先在对应子模块中切到目标提交或分支并验证，再回到父仓库提交子模块指针变更。
+
+## 12. 测试入口
+
+后端测试：
+
+```bash
+make backend-test
+```
+
+前端测试：
+
+```bash
+make frontend-test
+```
+
+如果后端覆盖率或集成测试遇到 testcontainers/Ryuk 问题，可在后端仓库内按其测试约定使用：
 
 ```bash
 TESTCONTAINERS_RYUK_DISABLED=true go test -cover ./...
@@ -252,10 +382,9 @@ TESTCONTAINERS_RYUK_DISABLED=true go test -cover ./...
 
 根目录 `CLAUDE.md` 和 `AGENTS.md` 都应指向本文件。任何 agent 在当前仓库工作时，都应把根目录 `README.md` 视为仓库级说明源。
 
-处理任务时请遵守以下边界：
+处理任务时请遵守：
 
 - 父仓库优先维护整合、部署、环境变量和文档。
 - 修改业务逻辑前，先确认变更应落在 `backend` 还是 `frontend` 子模块。
 - 不要把 `.env`、密钥、构建缓存或本地日志提交到仓库。
 - 修改子模块代码后，需要同时提交子模块仓库内变更和父仓库中的子模块指针变更。
-
