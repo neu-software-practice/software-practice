@@ -1,0 +1,10 @@
+.git
+.env
+.env.local
+backend
+frontend/node_modules
+frontend/dist
+frontend/coverage
+frontend/.vite
+**/*.log
+

@@ -1,0 +1,110 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_MODE: ${VITE_API_MODE:-http}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_MOCK_DELAY_MS: ${VITE_MOCK_DELAY_MS:-400}
+        VITE_TIMELINE_POLL_INTERVAL_MS: ${VITE_TIMELINE_POLL_INTERVAL_MS:-5000}
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    networks:
+      - neuhis-net
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    environment:
+      SERVER_ADDR: ":8080"
+      SERVER_MODE: ${SERVER_MODE:-debug}
+      DATABASE_DSN: "root:${MYSQL_ROOT_PASSWORD:-password}@tcp(mysql:3306)/${MYSQL_DATABASE:-neuhis}?charset=utf8mb4&parseTime=True&loc=Local"
+      JWT_SECRET: ${JWT_SECRET:-}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-10}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-20}
+      MEDAGENT_MODE: ${MEDAGENT_MODE:-http}
+      MEDAGENT_BASE_URL: "http://medagent:8080"
+      MEDAGENT_API_KEY: ${MEDAGENT_API_KEY:-}
+      MEDAGENT_PROVIDER: ${MEDAGENT_PROVIDER:-deepseek}
+      MEDAGENT_MODEL: ${MEDAGENT_MODEL:-deepseek-chat}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      medagent:
+        condition: service_started
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    networks:
+      - neuhis-net
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-neuhis}
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${MYSQL_ROOT_PASSWORD:-password}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - neuhis-net
+    restart: unless-stopped
+
+  medagent:
+    image: golang:1.25-bookworm@sha256:b96f24a8d7d010ea0acb9c3ba99064740f02b6b984612b28bd3c9c5ab9453e38
+    working_dir: /app
+    volumes:
+      - ./backend/medAgent:/app
+    command: >
+      sh -c "CGO_ENABLED=0 go run ./cmd/server
+      -addr :8080
+      -provider $${MEDAGENT_PROVIDER:-deepseek}
+      -model $${MEDAGENT_MODEL:-deepseek-chat}
+      -log-dir /tmp/medagent-logs"
+    environment:
+      DEEPSEEK_API_KEY: ${MEDAGENT_API_KEY:-}
+      DASHSCOPE_API_KEY: ${MEDAGENT_API_KEY:-}
+      OPENAI_API_KEY: ${MEDAGENT_API_KEY:-}
+      MEDAGENT_PROVIDER: ${MEDAGENT_PROVIDER:-deepseek}
+      MEDAGENT_MODEL: ${MEDAGENT_MODEL:-deepseek-chat}
+      GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    ports:
+      - "${MEDAGENT_PORT:-8083}:8080"
+    networks:
+      - neuhis-net
+    restart: unless-stopped
+
+networks:
+  neuhis-net:
+    driver: bridge
+
+volumes:
+  mysql-data:
