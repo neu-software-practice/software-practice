@@ -1,0 +1,25 @@
+services:
+  backend:
+    environment:
+      MEDAGENT_BASE_URL: http://medagent:8080
+      MEDAGENT_API_KEY: mock-key
+      MEDAGENT_PROVIDER: mock
+      MEDAGENT_MODEL: mock-model
+      RATE_LIMIT_RPS: "100"
+      RATE_LIMIT_BURST: "200"
+
+  medagent:
+    working_dir: /backend
+    volumes:
+      - ./backend:/backend
+    command: >
+      sh -c 'CGO_ENABLED=0 go run ./cmd/mock-medagent -addr :8080'
+    environment:
+      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      DEEPSEEK_API_KEY: mock-key
+      DASHSCOPE_API_KEY: mock-key
+      OPENAI_API_KEY: mock-key
+      MEDAGENT_LLM_BASE_URL: ""
+      MEDAGENT_PROVIDER: mock
+      MEDAGENT_MODEL: mock-model
+      GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
