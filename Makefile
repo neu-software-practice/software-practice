@@ -7,7 +7,7 @@ FRONTEND_DIR ?= frontend
 ENV_FILE ?= .env
 
 .PHONY: help init env require-env check-env config doctor env-print up down restart \
-	logs ps health verify-env verify-e2e deploy migrate backend-test frontend-test \
+	logs ps health verify-env medagent-smoke verify-e2e deploy migrate backend-test frontend-test \
 	submodule-status clean
 
 help: ## 查看命令列表，按新手部署顺序阅读
@@ -173,7 +173,11 @@ verify-env: require-env ## 实际进入容器，逐项验证 .env 配置是否�
 	check_container_value mysql MYSQL_DATABASE "$$mysql_database"; \
 	check_container_value medagent MEDAGENT_PROVIDER "$$(env_get MEDAGENT_PROVIDER)"; \
 	check_container_value medagent MEDAGENT_MODEL "$$(env_get MEDAGENT_MODEL)"; \
+	check_container_value medagent PATH "/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"; \
 	check_container_value medagent GOPROXY "$$(env_get GOPROXY)"; \
+	if grep -q '^MEDAGENT_LLM_BASE_URL=' $(ENV_FILE); then \
+		check_container_value medagent MEDAGENT_LLM_BASE_URL "$$(env_get MEDAGENT_LLM_BASE_URL)"; \
+	fi; \
 	check_container_value medagent DEEPSEEK_API_KEY "$$(env_get MEDAGENT_API_KEY)"; \
 	check_container_value medagent DASHSCOPE_API_KEY "$$(env_get MEDAGENT_API_KEY)"; \
 	check_container_value medagent OPENAI_API_KEY "$$(env_get MEDAGENT_API_KEY)"; \
@@ -183,6 +187,9 @@ verify-env: require-env ## 实际进入容器，逐项验证 .env 配置是否�
 	check_config_value VITE_TIMELINE_POLL_INTERVAL_MS "$$(env_get VITE_TIMELINE_POLL_INTERVAL_MS)"; \
 	check_config_value VITE_CREATE_VISIT_TIMEOUT_MS "$$(env_get VITE_CREATE_VISIT_TIMEOUT_MS)"; \
 	echo "OK: all runtime env vars and frontend build args match $(ENV_FILE)."
+
+medagent-smoke: require-env ## 调用真实 OpenAI 兼容模型，验证 medAgent 大模型推理可用
+	$(COMPOSE) --env-file $(ENV_FILE) exec -T medagent sh -c 'go run ./cmd/smoke -provider "$$MEDAGENT_PROVIDER" -base-url "$$MEDAGENT_LLM_BASE_URL" -model "$$MEDAGENT_MODEL" -prompt "用一句话说明你是否可用。"'
 
 verify-e2e: doctor up ps health verify-env ## 完整端到端验证：配置、启动、健康检查、容器内变量
 

@@ -171,10 +171,11 @@ make env-print
 | `MYSQL_ROOT_PASSWORD` | mysql env、backend `DATABASE_DSN` | `make verify-env` | 改动后如果旧 volume 已存在，需 `make clean` |
 | `MYSQL_DATABASE` | mysql env、backend `DATABASE_DSN` | `make verify-env` | backend 连接的数据库名 |
 | `MEDAGENT_MODE` | backend env | `make verify-env` | 后端调用 medAgent 的模式 |
-| `MEDAGENT_BASE_URL` | backend env | `make verify-env` | 集成部署默认 `http://medagent:8080` |
+| `MEDAGENT_BASE_URL` | backend env | `make verify-env` | backend 访问 medAgent 容器的地址，集成部署保持 `http://medagent:8080` |
 | `MEDAGENT_API_KEY` | backend env、medagent provider key env | `make verify-env` | 同步为 `DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`、`OPENAI_API_KEY` |
 | `MEDAGENT_PROVIDER` | backend env、medagent env/command | `make verify-env` | `deepseek`、`qwen` 或 `openai` |
 | `MEDAGENT_MODEL` | backend env、medagent env/command | `make verify-env` | 当前模型名 |
+| `MEDAGENT_LLM_BASE_URL` | medagent env/command | `make verify-env` | medAgent 调用 OpenAI 兼容大模型网关的地址，填到 `/chat/completions` 之前，通常以 `/v1` 结尾 |
 | `VITE_API_MODE` | frontend build arg | `make config` / `make verify-env` | 前端构建期变量，改动后必须重建 |
 | `VITE_API_BASE_URL` | frontend build arg | `make config` / `make verify-env` | 默认 `/api`，由 Nginx 代理到 backend |
 | `VITE_MOCK_DELAY_MS` | frontend build arg | `make config` / `make verify-env` | Mock 延迟 |
@@ -182,6 +183,8 @@ make env-print
 | `VITE_CREATE_VISIT_TIMEOUT_MS` | frontend build arg | `make config` / `make verify-env` | 创建问诊超时时间 |
 
 backend 容器内的 `DATABASE_DSN` 不再要求用户在父仓库 `.env` 中手写。Compose 会根据 `MYSQL_ROOT_PASSWORD` 和 `MYSQL_DATABASE` 生成 `root:<password>@tcp(mysql:3306)/<database>?charset=utf8mb4&parseTime=True&loc=Local`，`make verify-env` 会进入 backend 容器检查最终值。
+
+不要把 `MEDAGENT_BASE_URL` 改成大模型网关地址。它是 backend 访问 medAgent 容器的内部地址。OpenAI 兼容大模型网关应写入 `MEDAGENT_LLM_BASE_URL`，例如 `https://example.com/v1`。
 
 重要：`VITE_*` 是前端构建期变量，不会保留在最终 Nginx 运行容器的环境变量里。因此 `make verify-env` 通过 Compose build args 验证它们。
 
@@ -228,6 +231,14 @@ OK: all runtime env vars and frontend build args match .env.
 
 密钥类变量会被脱敏显示为 `<set:N chars>`。
 
+验证真实大模型推理：
+
+```bash
+make medagent-smoke
+```
+
+预期结果：输出 `provider=<当前 provider> model=<当前模型>`，并打印一段结构化 JSON 结果。该命令会真实调用 `MEDAGENT_API_KEY` 和 `MEDAGENT_LLM_BASE_URL` 指向的模型服务。
+
 查看日志：
 
 ```bash
@@ -253,7 +264,7 @@ make clean
 | `FRONTEND_PORT`、`BACKEND_PORT`、`MYSQL_PORT`、`MEDAGENT_PORT` | `make restart` | 端口映射由 Compose 重建容器生效 |
 | backend 运行变量，如 `SERVER_MODE`、`CORS_ALLOWED_ORIGINS`、`LOG_LEVEL` | `make restart` | 运行时环境变量需要重建容器 |
 | `MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE` | `make clean && make deploy` | MySQL 初始化值写入 volume，旧 volume 不会自动改密码/库名 |
-| `MEDAGENT_PROVIDER`、`MEDAGENT_MODEL`、`MEDAGENT_API_KEY` | `make restart` | medAgent 和 backend 都要拿到新环境变量 |
+| `MEDAGENT_PROVIDER`、`MEDAGENT_MODEL`、`MEDAGENT_API_KEY`、`MEDAGENT_LLM_BASE_URL` | `make restart` | medAgent 和 backend 都要拿到新环境变量 |
 | 任意 `VITE_*` | `make up` 或 `make deploy` | 前端构建期变量必须重新 build |
 
 ## 10. 常见断点
@@ -320,6 +331,22 @@ make verify-env
 ```
 
 `MEDAGENT_PROVIDER=deepseek` 时 medAgent 需要 `DEEPSEEK_API_KEY`。Compose 会把 `MEDAGENT_API_KEY` 同步到 `DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`、`OPENAI_API_KEY`，所以通常只需要检查 `.env` 中的 `MEDAGENT_API_KEY` 是否非空。
+
+如果接 OpenAI 兼容网关：
+
+```env
+MEDAGENT_PROVIDER=openai
+MEDAGENT_MODEL=your-model-name
+MEDAGENT_BASE_URL=http://medagent:8080
+MEDAGENT_LLM_BASE_URL=https://your-gateway.example/v1
+```
+
+然后：
+
+```bash
+make restart
+make medagent-smoke
+```
 
 ### CORS 报错
 

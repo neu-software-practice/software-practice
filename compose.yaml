@@ -85,17 +85,24 @@ services:
     volumes:
       - ./backend/medAgent:/app
     command: >
-      sh -c "CGO_ENABLED=0 go run ./cmd/server
+      sh -c 'base_url_arg="";
+      if [ -n "$${MEDAGENT_LLM_BASE_URL:-}" ]; then
+        base_url_arg="-base-url $${MEDAGENT_LLM_BASE_URL}";
+      fi;
+      CGO_ENABLED=0 go run ./cmd/server
       -addr :8080
-      -provider $${MEDAGENT_PROVIDER:-deepseek}
-      -model $${MEDAGENT_MODEL:-deepseek-chat}
-      -log-dir /tmp/medagent-logs"
+      -provider "$${MEDAGENT_PROVIDER:-deepseek}"
+      -model "$${MEDAGENT_MODEL:-deepseek-chat}"
+      $$base_url_arg
+      -log-dir /tmp/medagent-logs'
     environment:
+      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       DEEPSEEK_API_KEY: ${MEDAGENT_API_KEY:-}
       DASHSCOPE_API_KEY: ${MEDAGENT_API_KEY:-}
       OPENAI_API_KEY: ${MEDAGENT_API_KEY:-}
       MEDAGENT_PROVIDER: ${MEDAGENT_PROVIDER:-deepseek}
       MEDAGENT_MODEL: ${MEDAGENT_MODEL:-deepseek-chat}
+      MEDAGENT_LLM_BASE_URL: ${MEDAGENT_LLM_BASE_URL:-}
       GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
     ports:
       - "${MEDAGENT_PORT:-8083}:8080"
