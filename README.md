@@ -166,6 +166,7 @@ make env-print
 | `ADMIN_JWT_SECRET` | backend env | `make verify-env` | 管理端 JWT 密钥 |
 | `CORS_ALLOWED_ORIGINS` | backend env | `make verify-env` | 允许跨域来源 |
 | `LOG_LEVEL` | backend env | `make verify-env` | 后端日志级别 |
+| `RATE_LIMIT_ENABLED` | backend env | `make verify-env` | 是否启用后端认证接口限流；`stress-test` 分支默认 `false` |
 | `RATE_LIMIT_RPS` | backend env | `make verify-env` | 限流每秒请求数 |
 | `RATE_LIMIT_BURST` | backend env | `make verify-env` | 限流突发容量 |
 | `MYSQL_ROOT_PASSWORD` | mysql env、backend `DATABASE_DSN` | `make verify-env` | 改动后如果旧 volume 已存在，需 `make clean` |
@@ -262,7 +263,7 @@ make clean
 | 修改内容 | 推荐命令 | 原因 |
 | --- | --- | --- |
 | `FRONTEND_PORT`、`BACKEND_PORT`、`MYSQL_PORT`、`MEDAGENT_PORT` | `make restart` | 端口映射由 Compose 重建容器生效 |
-| backend 运行变量，如 `SERVER_MODE`、`CORS_ALLOWED_ORIGINS`、`LOG_LEVEL` | `make restart` | 运行时环境变量需要重建容器 |
+| backend 运行变量，如 `SERVER_MODE`、`CORS_ALLOWED_ORIGINS`、`LOG_LEVEL`、`RATE_LIMIT_ENABLED` | `make restart` | 运行时环境变量需要重建容器 |
 | `MYSQL_ROOT_PASSWORD`、`MYSQL_DATABASE` | `make clean && make deploy` | MySQL 初始化值写入 volume，旧 volume 不会自动改密码/库名 |
 | `MEDAGENT_PROVIDER`、`MEDAGENT_MODEL`、`MEDAGENT_API_KEY`、`MEDAGENT_LLM_BASE_URL` | `make restart` | medAgent 和 backend 都要拿到新环境变量 |
 | 任意 `VITE_*` | `make up` 或 `make deploy` | 前端构建期变量必须重新 build |
@@ -284,6 +285,23 @@ MEDAGENT_API_KEY=sk-local-test-key
 ```bash
 make doctor
 ```
+
+### 压测需要关闭后端认证限流
+
+`stress-test` 分支默认：
+
+```env
+RATE_LIMIT_ENABLED=false
+```
+
+修改后重启整合环境：
+
+```bash
+make restart
+make verify-env
+```
+
+该开关只影响后端认证接口的 `RateLimitMiddleware`，不会改变问诊轮次、地址数量等业务规则限制。
 
 ### 端口已被占用
 
